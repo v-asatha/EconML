@@ -400,13 +400,14 @@ class _OrthoLearner(TreatmentExpansionMixin, LinearCateEstimator):
     """
 
     def __init__(self, model_nuisance, model_final,
-                 discrete_treatment, n_splits, random_state):
+                 discrete_treatment, n_splits, random_state, oob_score=True):
         self._model_nuisance = clone(model_nuisance, safe=False)
         self._models_nuisance = None
         self._model_final = clone(model_final, safe=False)
         self._n_splits = n_splits
         self._discrete_treatment = discrete_treatment
         self._random_state = check_random_state(random_state)
+        self._oob_score = oob_score
         if discrete_treatment:
             self._label_encoder = LabelEncoder()
             self._one_hot_encoder = OneHotEncoder(categories='auto', sparse=False)
@@ -529,6 +530,27 @@ class _OrthoLearner(TreatmentExpansionMixin, LinearCateEstimator):
                                                                                    nuisances=nuisances,
                                                                                    sample_weight=sample_weight,
                                                                                    sample_var=sample_var))
+            if self._oob_score:
+                score = 0
+                for train, test in KFold(n_splits=5).split(T, Y):
+                    self._model_final.fit(Y[train], T[train],
+                                          **self._filter_none_kwargs(
+                                              X=self._subinds_check_none(X, train),
+                                              W=self._subinds_check_none(W, train),
+                                              Z=self._subinds_check_none(Z, train),
+                                              nuisances=tuple([self._subinds_check_none(nuis, train)
+                                                               for nuis in nuisances]),
+                                              sample_weight=self._subinds_check_none(sample_weight, train),
+                                              sample_var=self._subinds_check_none(sample_var, train)))
+                    score += self._model_final.score(Y[test], T[test],
+                                                     **self._filter_none_kwargs(
+                        X=self._subinds_check_none(X, test),
+                        W=self._subinds_check_none(W, test),
+                        Z=self._subinds_check_none(Z, test),
+                        nuisances=tuple([self._subinds_check_none(nuis, test) for nuis in nuisances]),
+                        sample_weight=self._subinds_check_none(sample_weight, test),
+                        sample_var=self._subinds_check_none(sample_var, test)))
+                self.oob_score_ = score / 5
 
     def const_marginal_effect(self, X=None):
         self._check_fitted_dims(X)
